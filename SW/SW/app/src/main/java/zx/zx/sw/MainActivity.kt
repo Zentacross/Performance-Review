@@ -38,6 +38,10 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.util.Calendar
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
@@ -142,10 +146,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openBackupLocation() {
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val fileName = "sw-backup-$timestamp.json"
+        
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "application/json"
-            putExtra(Intent.EXTRA_TITLE, "progress_backup.json")
+            putExtra(Intent.EXTRA_TITLE, fileName)
             putExtra(DocumentsContract.EXTRA_INITIAL_URI, Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS))
         }
         backupLauncher.launch(intent)
@@ -259,6 +266,7 @@ class MainActivity : AppCompatActivity() {
             R.id.tableLayout_week5
         )
 
+        val cal = Calendar.getInstance()
         var currentDay = 1
         for (tableLayoutId in tableLayoutIds) {
             val tableLayout = findViewById<TableLayout>(tableLayoutId)
@@ -270,7 +278,21 @@ class MainActivity : AppCompatActivity() {
                     val row = layoutInflater.inflate(R.layout.table_row_item, tableLayout, false) as TableRow
                     val dayTextView = row.findViewById<TextView>(R.id.dayTextView)
                     val summaryEditText = row.findViewById<EditText>(R.id.summaryEditText)
-                    dayTextView.text = currentDay.toString()
+                    
+                    cal.set(selectedYear, selectedMonth, currentDay)
+                    val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
+                    val dayInitial = when (dayOfWeek) {
+                        Calendar.SUNDAY -> "S"
+                        Calendar.MONDAY -> "M"
+                        Calendar.TUESDAY -> "T"
+                        Calendar.WEDNESDAY -> "W"
+                        Calendar.THURSDAY -> "T"
+                        Calendar.FRIDAY -> "F"
+                        Calendar.SATURDAY -> "S"
+                        else -> ""
+                    }
+                    
+                    dayTextView.text = "$currentDay-$dayInitial"
 
                     val dayForDialog = currentDay
                     summaryEditText.setOnClickListener {
@@ -340,12 +362,18 @@ class MainActivity : AppCompatActivity() {
                 val summary = summaryEditText.text.toString().takeIf { it.isNotBlank() }
 
                 val existingEntry = progressDao.getEntryByDayMonthYear(day, selectedMonth, selectedYear)
-                if (existingEntry == null) {
-                    // Insert new entry
-                    progressDao.insert(ProgressEntry(day = day, month = selectedMonth, year = selectedYear, score = score, summary = summary))
+
+                if (score == null && summary == null) {
+                    // If both are empty, delete existing entry if it exists
+                    existingEntry?.let { progressDao.delete(it) }
                 } else {
-                    // Update existing entry
-                    progressDao.update(existingEntry.copy(score = score, summary = summary))
+                    if (existingEntry == null) {
+                        // Insert new entry if at least one field is filled
+                        progressDao.insert(ProgressEntry(day = day, month = selectedMonth, year = selectedYear, score = score, summary = summary))
+                    } else {
+                        // Update existing entry
+                        progressDao.update(existingEntry.copy(score = score, summary = summary))
+                    }
                 }
             }
             runOnUiThread {
@@ -357,37 +385,27 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadProgressData() {
         activityScope.launch {
+            val allEntries = progressDao.getEntriesForMonthYear(selectedMonth, selectedYear).associateBy { it.day }
+            val daysInMonth = getDaysInMonth(selectedMonth, selectedYear)
+
             runOnUiThread {
                 updateDaysInMonthUI() // Update UI first to reflect correct number of days
-                // Clear existing data in EditTexts before loading new data
-                val daysInMonth = getDaysInMonth(selectedMonth, selectedYear)
-                for (day in 1..daysInMonth) {
-                    getEditTextsForDay(day)?.let { (scoreEditText, summaryEditText) ->
-                        scoreEditText.setText("")
-                        summaryEditText.setText("")
-                    }
-                }
-            }
+                
+                var totalScore = 0
+                val weeklyScores = IntArray(5)
 
-            val allEntries = progressDao.getEntriesForMonthYear(selectedMonth, selectedYear).associateBy { it.day }
-            var totalScore = 0
-            val weeklyScores = IntArray(5)
-
-            runOnUiThread {
-                val daysInMonth = getDaysInMonth(selectedMonth, selectedYear)
                 for (day in 1..daysInMonth) {
-                    val score = allEntries[day]?.score ?: 0
+                    val entry = allEntries[day]
+                    val score = entry?.score ?: 0
                     totalScore += score
                     val week = (day - 1) / 7
                     if(week < 5) {
                         weeklyScores[week] += score
                     }
 
-                    allEntries[day]?.let { entry ->
-                        getEditTextsForDay(day)?.let { (scoreEditText, summaryEditText) ->
-                            scoreEditText.setText(entry.score?.toString() ?: "")
-                            summaryEditText.setText(entry.summary ?: "")
-                        }
+                    getEditTextsForDay(day)?.let { (scoreEditText, summaryEditText) ->
+                        scoreEditText.setText(entry?.score?.toString() ?: "")
+                        summaryEditText.setText(entry?.summary ?: "")
                     }
                 }
 

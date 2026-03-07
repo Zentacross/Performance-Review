@@ -1,6 +1,7 @@
 package zx.zx.sw
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -13,6 +14,9 @@ interface ProgressDao {
 
     @Update
     suspend fun update(entry: ProgressEntry)
+
+    @Delete
+    suspend fun delete(entry: ProgressEntry)
 
     @Query("SELECT * FROM progress_entries WHERE day = :dayNumber AND month = :monthNumber AND year = :yearNumber LIMIT 1")
     suspend fun getEntryByDayMonthYear(dayNumber: Int, monthNumber: Int, yearNumber: Int): ProgressEntry?
